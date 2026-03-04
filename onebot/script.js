@@ -284,6 +284,7 @@ var uploadGetCallbackWrapperAddr = baseAddr.add({{.uploadGetCallbackWrapperAddr}
 var uploadGetCallbackWrapperFuncAddr = baseAddr.add({{.uploadGetCallbackWrapperFuncAddr}});
 var uploadOnCompleteAddr = baseAddr.add({{.uploadOnCompleteAddr}});
 var uploadOnCompleteFuncAddr = baseAddr.add({{.uploadOnCompleteFuncAddr}});
+var downloadImagAddr = baseAddr.add({{.downloadImagAddr}});
 
 var uploadImageX1;
 var imgCgiAddr = ptr(0);
@@ -1105,8 +1106,6 @@ rpc.exports = {
 
 // -------------------------接收消息分区-------------------------
 function setReceiver() {
-
-    // 3. 开始拦截
     Interceptor.attach(buf2RespAddr, {
         onEnter: function (args) {
             const currentPtr = this.context.x1;
@@ -1137,7 +1136,7 @@ function setReceiver() {
             const userContent = fields[5]
             const msgId = protobufVarintToNumberString(fields[6])
 
-            if (sender === "" || receiver === "" || content === "") {
+            if (sender === "" || receiver === "" || content === "" || msgId === "") {
                 console.log("字段缺失，无法解析 sender:" + sender + " receiver:" + receiver + hexdump(currentPtr, {
                     length: x2,
                     header: true,
@@ -1157,6 +1156,7 @@ function setReceiver() {
                 msgType = "group"
                 groupId = sender
 
+                let splitIndex = content.indexOf(':')
                 const sendUserStart = content.indexOf('wxid_')
                 senderUser = content.substring(sendUserStart, splitIndex).trim();
 
@@ -1174,13 +1174,13 @@ function setReceiver() {
                 // 处理用户的名称
                 splitIndex = userContent?.indexOf(':')
                 if (splitIndex === -1) {
-                    splitIndex = userContent?.indexOf('在群聊中@了你')
+                    splitIndex = userContent?.indexOf('在群聊中@了你') !== -1 ? userContent?.indexOf('在群聊中@了你') : userContent?.indexOf('在群聊中发了一段语')
                     senderNickname = userContent?.substring(0, splitIndex).trim();
                 } else {
                     senderNickname = userContent?.substring(0, splitIndex).trim();
                 }
                 if (!senderNickname) {
-                    senderNickname = sender
+                    senderNickname = senderUser
                 }
 
             } else {
@@ -1188,7 +1188,7 @@ function setReceiver() {
                 const splitIndex = userContent?.indexOf(':')
                 senderNickname = userContent?.substring(0, splitIndex).trim();
                 if (!senderNickname) {
-                    senderNickname = sender
+                    senderNickname = senderUser
                 }
             }
 
@@ -1206,10 +1206,30 @@ function setReceiver() {
                 sender: {user_id: senderUser, nickname: senderNickname},
                 msgsource: xml,
                 raw_message: content,
-                // media: mediaContent,
-                show_content:userContent
+                show_content: userContent
             })
         },
+    });
+
+    Interceptor.attach(downloadImagAddr, { // 建议使用函数起始地址或你计算出的偏移地址
+        onEnter: function (args) {
+            var dataPtr = this.context.x1;
+            var dataLen = this.context.x2.toInt32();
+            var fileId = this.context.sp.add(0x30).readPointer().readUtf8String();
+            var cdnUrl = this.context.x19.add(0x2F8).readPointer().readUtf8String();
+
+            if (dataLen > 0) {
+                var buffer = dataPtr.readByteArray(dataLen);
+                var uint8Array = new Uint8Array(buffer);
+
+                send({
+                    type: "download",
+                    media: Array.from(uint8Array),
+                    file_id: fileId,
+                    cdn_url: cdnUrl,
+                })
+            }
+        }
     });
 }
 

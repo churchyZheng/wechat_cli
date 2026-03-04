@@ -9,3 +9,5 @@ go_al/*.go
 onebot/onebot
 *.tar.gz
 release
+onebot/audio
+onebot/image

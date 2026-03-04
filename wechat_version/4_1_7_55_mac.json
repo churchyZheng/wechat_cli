@@ -17,5 +17,6 @@
   "uploadGetCallbackWrapperAddr": "0x49068CC",
   "uploadGetCallbackWrapperFuncAddr": "0x36AFBEC",
   "uploadOnCompleteAddr": "0x4906EC8",
-  "uploadOnCompleteFuncAddr": "0x36B0DD0"
+  "uploadOnCompleteFuncAddr": "0x36B0DD0",
+  "downloadImagAddr": "0x49FB92C"
 }

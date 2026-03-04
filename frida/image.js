@@ -82,65 +82,6 @@ function generateAESKey() {
     return key;
 }
 
-function getCleanString(uint8Array) {
-    var out = "";
-    var i = 0;
-    var len = uint8Array.length;
-
-    while (i < len) {
-        var c = uint8Array[i++];
-
-        // 1. 处理单字节 (ASCII: 0xxxxxxx)
-        if (c < 0x80) {
-            // 只保留可见字符 (Space 32 到 ~ 126)
-            if (c >= 32 && c <= 126) {
-                out += String.fromCharCode(c);
-            }
-        }
-        // 2. 处理双字节 (110xxxxx 10xxxxxx)
-        else if ((c & 0xE0) === 0xC0 && i < len) {
-            var c2 = uint8Array[i++];
-            if ((c2 & 0xC0) === 0x80) {
-                // 这种通常是特殊拉丁字母等，按需保留
-                var charCode = ((c & 0x1F) << 6) | (c2 & 0x3F);
-                out += String.fromCharCode(charCode);
-            }
-        }
-        // 3. 处理三字节 (1110xxxx 10xxxxxx 10xxxxxx) -> 绝大多数汉字在此
-        else if ((c & 0xF0) === 0xE0 && i + 1 < len) {
-            var c2 = uint8Array[i++];
-            var c3 = uint8Array[i++];
-            if ((c2 & 0xC0) === 0x80 && (c3 & 0xC0) === 0x80) {
-                var charCode = ((c & 0x0F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F);
-                if (
-                    (charCode >= 0x4E00 && charCode <= 0x9FA5) || // 基本汉字
-                    (charCode >= 0x3000 && charCode <= 0x303F) || // 常用中文标点 (。，、)
-                    (charCode >= 0xFF00 && charCode <= 0xFFEF) || // 全角符号/标点 (！：？)
-                    (charCode >= 0x2000 && charCode <= 0x206F) || // 常用标点扩展 (含 \u2005)
-                    (charCode >= 0x3400 && charCode <= 0x4DBF)    // 扩展 A 区汉字
-                ) {
-                    out += String.fromCharCode(charCode);
-                }
-            }
-        } else if ((c & 0xF8) === 0xF0 && i + 2 < len) {
-            var c2 = uint8Array[i++];
-            var c3 = uint8Array[i++];
-            var c4 = uint8Array[i++];
-            if ((c2 & 0xC0) === 0x80 && (c3 & 0xC0) === 0x80 && (c4 & 0xC0) === 0x80) {
-                // 计算 Unicode 码点
-                var codePoint = ((c & 0x07) << 18) | ((c2 & 0x3F) << 12) | ((c3 & 0x3F) << 6) | (c4 & 0x3F);
-
-                // Emoji 范围通常在 U+1F000 到 U+1F9FF 之间
-                if (codePoint >= 0x1F000 && codePoint <= 0x1FADF) {
-                    // 使用 fromCodePoint 处理 4 字节字符
-                    out += String.fromCodePoint(codePoint);
-                }
-            }
-        }
-    }
-    return out;
-}
-
 function generateBytes(n) {
     // 生成随机字符串
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

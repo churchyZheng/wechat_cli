@@ -81,7 +81,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	
 }
 
-func SendWebSocketMsg(msg map[string]interface{}) {
+func SendWebSocketMsg(jsonData []byte) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("panic: %v, %v\n", r, string(debug.Stack()))
@@ -89,17 +89,13 @@ func SendWebSocketMsg(msg map[string]interface{}) {
 	}()
 	
 	time.Sleep(time.Duration(config.SendInterval) * time.Millisecond)
-	// 这里处理你的 X1 数据
-	jsonData, err := json.Marshal(msg["payload"])
+	
+	jsonReq, err := HandleMsg(jsonData)
 	if err != nil {
 		log.Printf("JSON 序列化失败: %v\n", err)
 		return
 	}
-	
-	m := new(WechatMessage)
-	jsonReq, err := HandleMsg(jsonData, m)
-	if err != nil {
-		log.Printf("JSON 序列化失败: %v\n", err)
+	if jsonReq == nil {
 		return
 	}
 	

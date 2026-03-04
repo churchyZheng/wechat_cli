@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"crypto/aes"
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	log "log"
@@ -155,7 +157,8 @@ func SilkToMp3(silkBytes []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-func HandleMsg(jsonData []byte, m *WechatMessage) ([]byte, error) {
+func HandleMsg(jsonData []byte) ([]byte, error) {
+	m := new(WechatMessage)
 	err := json.Unmarshal(jsonData, m)
 	if err != nil {
 		log.Printf("解析消息失败: %v\n", err)
@@ -173,9 +176,71 @@ func HandleMsg(jsonData []byte, m *WechatMessage) ([]byte, error) {
 				log.Printf("保存音频失败: %v\n", err)
 				return nil, err
 			}
-			msg.Data.URL = path
+			msg.Data.URL = "file://" + path
 			msg.Data.Media = nil
+		} else if msg.Type == "image" {
+			var fileMsg FileMsg
+			err := xml.Unmarshal([]byte(msg.Data.Text), &fileMsg)
+			if err != nil {
+				log.Printf("XML解析失败: %v\n", err)
+				return nil, err
+			}
+			
+			// 如果有图片等待图片下载完成再处理
+			if len(msg.Data.Media) == 0 {
+				if downloadMsgInter, ok := userID2FileMsgMap.Load(fileMsg.Image.ThumbURL); ok {
+					downloadReq := downloadMsgInter.(*DownloadRequest)
+					aesKey, _ := hex.DecodeString(fileMsg.Image.ThumbAesKey)
+					path, err := GetImagePath(downloadReq.Media, aesKey)
+					if err != nil {
+						log.Printf("获取图片路径失败: %v\n", err)
+						return nil, err
+					}
+					msg.Data.URL = "file://" + path
+					userID2FileMsgMap.Delete(fileMsg.Image.ThumbURL)
+				}
+			}
 		}
 	}
 	return json.Marshal(m)
+}
+
+func GetImagePath(data []byte, key []byte) (string, error) {
+	block, _ := aes.NewCipher(key)
+	decrypted := make([]byte, len(data))
+	bs := block.BlockSize()
+	for i := 0; i < len(data); i += bs {
+		block.Decrypt(decrypted[i:i+bs], data[i:i+bs])
+	}
+	
+	if bytes.HasPrefix(decrypted, []byte{0xFF, 0xD8, 0xFF}) {
+		return SaveImageToFile("jpg", decrypted)
+	} else if bytes.HasPrefix(decrypted, []byte{0x89, 0x50, 0x4E, 0x47}) {
+		return SaveImageToFile("png", decrypted)
+	} else if bytes.HasPrefix(decrypted, []byte("GIF89a")) || bytes.HasPrefix(decrypted, []byte("GIF87a")) {
+		return SaveImageToFile("gif", decrypted)
+	} else if bytes.HasPrefix(decrypted, []byte{0x42, 0x4D}) {
+		return SaveImageToFile("bmp", decrypted)
+	}
+	
+	return "", fmt.Errorf("无法解析的图像数据")
+}
+
+func SaveImageToFile(ext string, data []byte) (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	randomNumber := r.Intn(1000)
+	timestamp := time.Now().Unix()
+	fileName := fmt.Sprintf("%d_%d.%s", randomNumber, timestamp, ext)
+	targetPath := filepath.Dir(exePath) + "/image/" + fileName
+	err = os.WriteFile(targetPath, data, 0644)
+	if err != nil {
+		return "", err
+	}
+	
+	return targetPath, nil
 }

@@ -9,87 +9,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
-	"sync"
 	"syscall"
 	"text/template"
 	
 	"github.com/frida/frida-go/frida"
 )
-
-// 全局变量，保持 Frida 脚本对象
-var (
-	fridaScript *frida.Script
-	session     *frida.Session
-	taskId      = int64(0x20000000)
-	myWechatId  = ""
-	
-	msgChan    = make(chan *SendMsg, 10)
-	finishChan = make(chan struct{})
-	
-	config = &Config{}
-	
-	userID2NicknameMap sync.Map
-)
-
-type WechatMessage struct {
-	GroupId   string     `json:"group_id"`
-	SelfID    string     `json:"self_id"`
-	UserID    string     `json:"user_id"`
-	Sender    *Sender    `json:"sender"`
-	Time      int64      `json:"time"`
-	PostType  string     `json:"post_type"`
-	MessageId string     `json:"message_id"`
-	Message   []*Message `json:"message"`
-}
-
-type Sender struct {
-	UserID   string `json:"user_id"`
-	Nickname string `json:"nickname"`
-}
-
-type SendMsg struct {
-	UserId  string
-	GroupID string
-	Content string
-	Type    string
-	AtUser  string
-}
-
-// SendRequest 请求结构体
-type SendRequest struct {
-	Message []*Message `json:"message"`
-	UserID  string     `json:"user_id"`
-	GroupID string     `json:"group_id"`
-}
-
-type Message struct {
-	Type string           `json:"type"`
-	Data *SendRequestData `json:"data"`
-}
-
-type SendRequestData struct {
-	Id    string `json:"id"`
-	Text  string `json:"text"`
-	File  string `json:"file"`
-	URL   string `json:"url"`
-	QQ    string `json:"qq"`
-	Media []byte `json:"media"`
-}
-
-type Config struct {
-	FridaType       string `json:"frida_type"`
-	SendURL         string `json:"send_url"`
-	ReceiveHost     string `json:"receive_host"`
-	FridaGadgetAddr string `json:"frida_gadget_addr"`
-	WechatPid       int    `json:"wechat_pid"`
-	OnebotToken     string `json:"onebot_token"`
-	ImagePath       string `json:"image_path"`
-	ConnType        string `json:"conn_type"`
-	SendInterval    int    `json:"send_interval"`
-	
-	WechatConf string `json:"wechat_conf"`
-}
 
 func main() {
 	initFlag()
@@ -115,7 +41,7 @@ func main() {
 	}()
 	
 	// 3. 启动服务
-	fmt.Printf("HTTP 服务启动在 %s", config.ReceiveHost)
+	fmt.Printf("HTTP 服务启动在 %s\n", config.ReceiveHost)
 	if err := http.ListenAndServe(config.ReceiveHost, nil); err != nil {
 		log.Printf("服务启动失败: %v\n", err)
 	}
@@ -145,7 +71,14 @@ func initFlag() {
 	fmt.Println("ImagePath", config.ImagePath)
 	fmt.Println("WechatConf", config.WechatConf)
 	
-	EnsureDir("./audio")
+	err := EnsureDir("./audio")
+	if err != nil {
+		log.Fatalf("❌ 无法创建音频目录: %v\n", err)
+	}
+	err = EnsureDir("./image")
+	if err != nil {
+		log.Fatalf("❌ 无法创建图片目录: %v\n", err)
+	}
 }
 
 func initFridaGadget() {
@@ -220,8 +153,18 @@ func loadJs() {
 	
 	// 打印 JS 里的 console.log
 	script.On("message", func(rawMsg string) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("panic: %v, %v\n", r, string(debug.Stack()))
+			}
+		}()
+		
 		var msg map[string]interface{}
-		json.Unmarshal([]byte(rawMsg), &msg)
+		err = json.Unmarshal([]byte(rawMsg), &msg)
+		if err != nil {
+			log.Printf("JSON解析失败: %v\n", err)
+			return
+		}
 		
 		msgType := msg["type"].(string)
 		
@@ -229,13 +172,14 @@ func loadJs() {
 		case "send":
 			if p, ok := msg["payload"]; ok {
 				if pMap, ok := p.(map[string]interface{}); ok {
+					payloadJson, _ := json.Marshal(pMap)
 					if t, ok := pMap["type"]; ok {
 						switch t.(string) {
 						case "send":
 							if config.ConnType == "http" {
-								go SendHttpReq(msg)
+								go SendHttpReq(payloadJson)
 							} else {
-								go SendWebSocketMsg(msg)
+								go SendWebSocketMsg(payloadJson)
 							}
 						case "finish":
 							finishChan <- struct{}{}
@@ -257,6 +201,11 @@ func loadJs() {
 								}
 							}
 							msgChan <- m
+						case "download":
+							err = Download(payloadJson)
+							if err != nil {
+								log.Printf("下载失败: %v\n", err)
+							}
 						}
 						
 					}

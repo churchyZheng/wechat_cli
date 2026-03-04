@@ -71,7 +71,7 @@ func sendHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func SendHttpReq(msg map[string]interface{}) {
+func SendHttpReq(jsonData []byte) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("panic: %v, %v\n", r, string(debug.Stack()))
@@ -79,17 +79,12 @@ func SendHttpReq(msg map[string]interface{}) {
 	}()
 	
 	time.Sleep(time.Duration(config.SendInterval) * time.Millisecond)
-	// 这里处理你的 X1 数据
-	jsonData, err := json.Marshal(msg["payload"])
+	jsonReq, err := HandleMsg(jsonData)
 	if err != nil {
 		log.Printf("JSON 序列化失败: %v\n", err)
 		return
 	}
-	
-	m := new(WechatMessage)
-	jsonReq, err := HandleMsg(jsonData, m)
-	if err != nil {
-		log.Printf("JSON 序列化失败: %v\n", err)
+	if jsonReq == nil {
 		return
 	}
 	
@@ -102,7 +97,7 @@ func SendHttpReq(msg map[string]interface{}) {
 	
 	// 5. 设置 Header (OneBot 接口通常要求 application/json)
 	h := hmac.New(sha1.New, []byte(config.OnebotToken))
-	h.Write(jsonData)
+	h.Write(jsonReq)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Signature", "sha1="+hex.EncodeToString(h.Sum(nil)))
 	
