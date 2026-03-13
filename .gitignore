@@ -17,3 +17,7 @@ onebot/file
 file/
 image/
 scripts/__pycache__/
+insert_dylib/.git/
+insert_dylib/.git.bak/
+insert_dylib/build/
+insert_dylib/*.dylib
